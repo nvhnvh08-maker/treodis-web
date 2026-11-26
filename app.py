@@ -609,6 +609,99 @@ async def handle_start_tab(request: web.Request) -> web.Response:
     return web.json_response({"tab": serialize_tab(row, rt)})
 
 
+async def handle_test_send(request: web.Request) -> web.Response:
+    user = get_current_user(request)
+    if not user:
+        return web.json_response({"error": "Chưa đăng nhập"}, status=401)
+
+    tab_id = int(request.match_info["id"])
+    db: sqlite3.Connection = request.app["db"]
+    row = db.execute(
+        "SELECT * FROM tabs WHERE id = ? AND user_id = ?",
+        (tab_id, user["id"]),
+    ).fetchone()
+    if not row:
+        return web.json_response({"error": "Không tìm thấy tab"}, status=404)
+
+    tokens = [x.strip() for x in row["tokens_text"].splitlines() if x.strip()]
+    channels = [x.strip() for x in row["channels_text"].splitlines() if x.strip()]
+    if not tokens:
+        return web.json_response({"error": "Chưa nhập Token"}, status=400)
+    if not channels:
+        return web.json_response({"error": "Chưa nhập ID Channel"}, status=400)
+
+    token = tokens[0]
+    channel_id = channels[0]
+
+    workers: WorkerManager = request.app["workers"]
+    rt = workers.get(tab_id)
+
+    client_info = random.choice(USER_AGENTS)
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "User-Agent": client_info["ua"],
+        "Accept": "*/*",
+        "Origin": "https://discord.com",
+        "X-Discord-Locale": "vi-VN",
+    }
+
+    results = {}
+
+    # Fetch channel info
+    try:
+        async with AsyncSession(impersonate="chrome", verify=False) as session:
+            ch_res = await session.get(
+                f"https://discord.com/api/v10/channels/{channel_id}",
+                headers=headers,
+                timeout=8,
+            )
+            if ch_res.status_code == 200:
+                ch_data = ch_res.json()
+                ch_name = ch_data.get("name") or ch_data.get("id", channel_id)
+                guild_id = ch_data.get("guild_id", "DM")
+                results["channel"] = f"#{ch_name} (server: {guild_id})"
+                rt.add_log("info", f"[Thử] Kênh xác nhận: #{ch_name} | Server ID: {guild_id}")
+            else:
+                results["channel"] = f"Không lấy được tên kênh (mã {ch_res.status_code})"
+                rt.add_log("warn", f"[Thử] Không lấy được tên kênh: {ch_res.status_code}")
+
+            # Send plain test message
+            payload = {
+                "content": "✅ [TreoDis Test] Tin thử — nếu thấy dòng này kênh đúng rồi!",
+                "tts": False,
+                "nonce": generate_snowflake_nonce(),
+                "flags": 0,
+            }
+            send_res = await session.post(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                headers=headers,
+                json=payload,
+                timeout=8,
+                impersonate="chrome",
+            )
+            results["send_status"] = send_res.status_code
+            if send_res.status_code == 200:
+                rt.add_log("ok", f"[Thử] Gửi tin test thành công vào kênh {channel_id} — kiểm tra Discord ngay")
+                results["message"] = "Gửi thành công! Kiểm tra Discord ngay để xem tin có hiện không."
+            elif send_res.status_code == 429:
+                retry = send_res.json().get("retry_after", "?")
+                rt.add_log("warn", f"[Thử] Rate limit 429, thử lại sau {retry}s")
+                results["message"] = f"Rate limit 429, thử lại sau {retry}s"
+            else:
+                try:
+                    err = send_res.json()
+                except Exception:
+                    err = {}
+                rt.add_log("err", f"[Thử] Gửi lỗi mã {send_res.status_code}: {err.get('message','')}")
+                results["message"] = f"Lỗi {send_res.status_code}: {err.get('message','Không rõ')}"
+    except Exception as exc:
+        results["message"] = f"Lỗi kết nối: {exc}"
+        rt.add_log("err", f"[Thử] Lỗi kết nối: {exc}")
+
+    return web.json_response(results)
+
+
 async def handle_stop_tab(request: web.Request) -> web.Response:
     user = get_current_user(request)
     if not user:
@@ -672,6 +765,7 @@ def create_app() -> web.Application:
     app.router.add_put("/api/tabs/{id:\\d+}", handle_update_tab)
     app.router.add_post("/api/tabs/{id:\\d+}/start", handle_start_tab)
     app.router.add_post("/api/tabs/{id:\\d+}/stop", handle_stop_tab)
+    app.router.add_post("/api/tabs/{id:\\d+}/test", handle_test_send)
     app.router.add_delete("/api/tabs/{id:\\d+}", handle_delete_tab)
     app.router.add_static("/static", STATIC_DIR)
     return app

@@ -49,6 +49,7 @@ const el = {
   cfgLogs: document.getElementById('cfg-logs'),
   configError: document.getElementById('config-error'),
   btnCfgToggle: document.getElementById('btn-cfg-toggle'),
+  btnCfgTest: document.getElementById('btn-cfg-test'),
 };
 
 function formatDuration(totalSeconds) {
@@ -422,6 +423,34 @@ el.btnCfgToggle.addEventListener('click', async () => {
     await fetchTabs();
   } catch (err) {
     el.configError.textContent = err.message;
+  }
+});
+
+el.btnCfgTest.addEventListener('click', async () => {
+  if (state.activeTabId === null) return;
+  el.configError.textContent = '';
+  el.btnCfgTest.disabled = true;
+  el.btnCfgTest.textContent = 'Đang gửi...';
+  try {
+    await saveActiveConfig();
+    const result = await api(`/api/tabs/${state.activeTabId}/test`, { method: 'POST' });
+    await fetchTabs();
+    if (result.channel) {
+      el.configError.style.color = 'var(--positive)';
+      el.configError.textContent = `Kênh: ${result.channel} — ${result.message || ''}`;
+    } else {
+      el.configError.style.color = 'var(--negative)';
+      el.configError.textContent = result.message || 'Có lỗi xảy ra';
+    }
+  } catch (err) {
+    el.configError.style.color = 'var(--negative)';
+    el.configError.textContent = err.message;
+  } finally {
+    el.btnCfgTest.disabled = false;
+    el.btnCfgTest.textContent = 'Gửi thử 1 tin';
+    setTimeout(() => {
+      el.configError.style.color = '';
+    }, 6000);
   }
 });
 
