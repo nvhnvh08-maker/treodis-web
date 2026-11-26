@@ -74,6 +74,14 @@ def mask_token(token: str) -> str:
     return token[: max(1, len(token) // 2)] + "..."
 
 
+def parse_channel_id(raw: str) -> str:
+    """Trích xuất ID kênh từ ID thuần hoặc link kênh Discord."""
+    s = raw.strip().rstrip("/")
+    if "/" in s:
+        s = s.rsplit("/", 1)[-1]
+    return s
+
+
 def hash_password(password: str, salt: Optional[str] = None) -> str:
     if salt is None:
         salt = secrets.token_hex(16)
@@ -344,7 +352,7 @@ class WorkerManager:
             return rt
 
         tokens = [x.strip() for x in tab_row["tokens_text"].splitlines() if x.strip()]
-        channels = [x.strip() for x in tab_row["channels_text"].splitlines() if x.strip()]
+        channels = [parse_channel_id(x) for x in tab_row["channels_text"].splitlines() if parse_channel_id(x)]
         message_text = tab_row["message_text"].strip()
         burst_count = max(1, int(tab_row["burst_count"] or 1))
         global_delay = max(0.0, float(tab_row["delay"] or 0.0))
@@ -624,7 +632,7 @@ async def handle_test_send(request: web.Request) -> web.Response:
         return web.json_response({"error": "Không tìm thấy tab"}, status=404)
 
     tokens = [x.strip() for x in row["tokens_text"].splitlines() if x.strip()]
-    channels = [x.strip() for x in row["channels_text"].splitlines() if x.strip()]
+    channels = [parse_channel_id(x) for x in row["channels_text"].splitlines() if parse_channel_id(x)]
     if not tokens:
         return web.json_response({"error": "Chưa nhập Token"}, status=400)
     if not channels:
@@ -635,20 +643,10 @@ async def handle_test_send(request: web.Request) -> web.Response:
 
     workers: WorkerManager = request.app["workers"]
     rt = workers.get(tab_id)
-
-    client_info = random.choice(USER_AGENTS)
-    headers = {
-        "Authorization": token,
-        "Content-Type": "application/json",
-        "User-Agent": client_info["ua"],
-        "Accept": "*/*",
-        "Origin": "https://discord.com",
-        "X-Discord-Locale": "vi-VN",
-    }
+    headers = rt.build_headers(token)
 
     results = {}
 
-    # Fetch channel info
     try:
         async with AsyncSession(impersonate="chrome", verify=False) as session:
             ch_res = await session.get(
@@ -666,9 +664,8 @@ async def handle_test_send(request: web.Request) -> web.Response:
                 results["channel"] = f"Không lấy được tên kênh (mã {ch_res.status_code})"
                 rt.add_log("warn", f"[Thử] Không lấy được tên kênh: {ch_res.status_code}")
 
-            # Send plain test message
             payload = {
-                "content": "✅ [TreoDis Test] Tin thử — nếu thấy dòng này kênh đúng rồi!",
+                "content": "[TreoDis Test] Tin thử — nếu thấy dòng này kênh đúng rồi",
                 "tts": False,
                 "nonce": generate_snowflake_nonce(),
                 "flags": 0,
@@ -682,8 +679,24 @@ async def handle_test_send(request: web.Request) -> web.Response:
             )
             results["send_status"] = send_res.status_code
             if send_res.status_code == 200:
-                rt.add_log("ok", f"[Thử] Gửi tin test thành công vào kênh {channel_id} — kiểm tra Discord ngay")
-                results["message"] = "Gửi thành công! Kiểm tra Discord ngay để xem tin có hiện không."
+                msg_id = send_res.json().get("id")
+                await asyncio.sleep(1.0)
+                kept = None
+                if msg_id:
+                    chk = await session.get(
+                        f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=5",
+                        headers=headers,
+                        timeout=8,
+                    )
+                    if chk.status_code == 200:
+                        kept = any(m.get("id") == msg_id for m in chk.json())
+
+                if kept is False:
+                    rt.add_log("warn", f"[Thử] Tin #{msg_id} đã gửi nhưng bị AutoMod/bot xóa sau 1 giây")
+                    results["message"] = "Tin gửi được nhưng bị AutoMod/bot trên server xóa ngay lập tức"
+                else:
+                    rt.add_log("ok", f"[Thử] Gửi tin test thành công vào kênh {channel_id}")
+                    results["message"] = "Gửi thành công và tin vẫn còn trên kênh"
             elif send_res.status_code == 429:
                 retry = send_res.json().get("retry_after", "?")
                 rt.add_log("warn", f"[Thử] Rate limit 429, thử lại sau {retry}s")

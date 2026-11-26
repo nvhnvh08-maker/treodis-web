@@ -357,7 +357,7 @@ textarea:user-invalid {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 30px;
   padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline-strong);
@@ -365,6 +365,8 @@ textarea:user-invalid {
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
 }
 
@@ -736,12 +738,14 @@ dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .modal-foot-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
