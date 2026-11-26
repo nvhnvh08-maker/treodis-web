@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TreoDis — Điều khiển treo Discord theo tab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Auth Screen -->
+  <main id="auth-view" class="auth-shell" hidden>
+    <section class="auth-card" aria-labelledby="auth-heading">
+      <div class="brand-row">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">TreoDis</span>
+      </div>
+
+      <h1 id="auth-heading" class="auth-title">Đăng nhập tài khoản</h1>
+      <p id="auth-subtitle" class="auth-subtitle">Quản lý và treo nhiều tab gửi ngôn Discord chạy nền</p>
+
+      <div class="auth-tabs" role="tablist" aria-label="Chế độ tài khoản">
+        <button type="button" role="tab" id="tab-login" class="auth-tab is-active" aria-selected="true">Đăng nhập</button>
+        <button type="button" role="tab" id="tab-register" class="auth-tab" aria-selected="false">Đăng ký</button>
+      </div>
+
+      <form id="auth-form" class="auth-form" method="POST" action="/api/login" novalidate>
+        <div class="field">
+          <label for="auth-username">Tên đăng nhập</label>
+          <input
+            id="auth-username"
+            name="username"
+            type="text"
+            autocomplete="username"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            minlength="3"
+            maxlength="32"
+            required
+            placeholder="toi_la_admin"
+          >
+        </div>
+
+        <div class="field">
+          <label for="auth-password">Mật khẩu</label>
+          <div class="password-wrap">
+            <input
+              id="auth-password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              minlength="4"
+              required
+              placeholder="Ít nhất 4 ký tự"
+            >
+            <button
+              type="button"
+              id="toggle-password"
+              class="icon-btn"
+              aria-pressed="false"
+              aria-label="Hiện mật khẩu"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <p id="auth-error" class="form-error" role="status" aria-live="polite"></p>
+
+        <button type="submit" id="auth-submit" class="btn btn-primary btn-full">Đăng nhập</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- App Workspace -->
+  <div id="app-view" class="app-shell" hidden>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="topbar-left">
+          <div class="brand-row">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-name">TreoDis</span>
+          </div>
+          <span class="divider-v" aria-hidden="true"></span>
+          <span id="active-summary" class="summary-meta mono">0 tab đang chạy</span>
+        </div>
+
+        <div class="topbar-right">
+          <span id="user-display" class="user-pill mono"></span>
+          <button type="button" id="btn-logout" class="btn btn-ghost">Đăng xuất</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <div class="workspace-head">
+        <div>
+          <h1 class="page-title">Danh sách tab treo</h1>
+          <p class="page-subtitle">Mỗi tab chạy độc lập theo cấu hình Token, Channel, Delay và nội dung ngôn</p>
+        </div>
+        <button type="button" id="btn-open-create" class="btn btn-primary">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Tạo tab treo
+        </button>
+      </div>
+
+      <section id="empty-state" class="empty-state" hidden>
+        <p class="empty-title">Chưa có tab treo nào</p>
+        <p class="empty-desc">Bấm Tạo tab treo để đặt tên tab và cấu hình gửi ngôn</p>
+        <button type="button" id="btn-empty-create" class="btn btn-secondary">Tạo tab đầu tiên</button>
+      </section>
+
+      <section id="tabs-grid" class="tabs-grid" aria-label="Các tab treo"></section>
+    </main>
+  </div>
+
+  <!-- Dialog: Tạo tab treo -->
+  <dialog id="create-dialog" class="modal modal-sm" closedby="any" aria-labelledby="create-dialog-title">
+    <form id="create-form" class="modal-box" method="dialog">
+      <div class="modal-head">
+        <h2 id="create-dialog-title" class="modal-title">Tạo tab treo mới</h2>
+        <button type="button" class="icon-btn" data-close-dialog="create-dialog" aria-label="Đóng">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field">
+          <label for="new-tab-name">Nhập tên tab</label>
+          <input
+            id="new-tab-name"
+            name="name"
+            type="text"
+            maxlength="60"
+            required
+            autofocus
+            placeholder="Ví dụ: Kênh chính 1"
+          >
+        </div>
+        <p id="create-error" class="form-error" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" data-close-dialog="create-dialog">Hủy</button>
+        <button type="submit" id="btn-create-submit" class="btn btn-primary">Tạo tab</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: Cấu hình tab gửi ngôn -->
+  <dialog id="config-dialog" class="modal modal-lg" closedby="any" aria-labelledby="config-dialog-title">
+    <form id="config-form" class="modal-box" method="dialog">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <h2 id="config-dialog-title" class="modal-title">Cấu hình tab</h2>
+          <span id="config-status-meta" class="status-badge">Đã dừng</span>
+        </div>
+        <button type="button" class="icon-btn" data-close-dialog="config-dialog" aria-label="Đóng">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body config-layout">
+        <div class="config-fields">
+          <div class="field">
+            <label for="cfg-name">Tên tab</label>
+            <input id="cfg-name" name="name" type="text" maxlength="60" required>
+          </div>
+
+          <div class="field">
+            <label for="cfg-tokens">Nhập Token (mỗi dòng 1 token)</label>
+            <textarea
+              id="cfg-tokens"
+              name="tokens_text"
+              rows="3"
+              class="mono"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false"
+              placeholder="Dán token Discord vào đây, mỗi dòng 1 token"
+            ></textarea>
+          </div>
+
+          <div class="field">
+            <label for="cfg-channels">Nhập ID Channel (mỗi dòng 1 ID)</label>
+            <textarea
+              id="cfg-channels"
+              name="channels_text"
+              rows="2"
+              class="mono"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false"
+              placeholder="123456789012345678"
+            ></textarea>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="cfg-delay">Nhập Delay (giây)</label>
+              <input id="cfg-delay" name="delay" type="number" min="0" step="0.1" value="0" class="mono">
+            </div>
+
+            <div class="field">
+              <label for="cfg-burst">1 lần bắn mấy ngôn</label>
+              <input id="cfg-burst" name="burst_count" type="number" min="1" step="1" value="1" class="mono">
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="cfg-message">Nội dung ngôn (hoặc chọn file .txt)</label>
+              <label for="cfg-file" class="file-btn">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Tải file .txt
+              </label>
+              <input id="cfg-file" type="file" accept=".txt,text/plain" class="visually-hidden">
+            </div>
+            <textarea
+              id="cfg-message"
+              name="message_text"
+              rows="5"
+              placeholder="Nhập nội dung ngôn hoặc tải file ngon.txt lên"
+            ></textarea>
+          </div>
+
+          <p id="config-error" class="form-error" role="status" aria-live="polite"></p>
+        </div>
+
+        <aside class="log-panel" aria-label="Nhật ký chạy tab">
+          <div class="log-head">
+            <span class="log-title">Nhật ký gửi</span>
+            <span id="cfg-stats" class="log-stats mono">0 thành công · 0 lỗi</span>
+          </div>
+          <div id="cfg-logs" class="log-list mono">
+            <div class="log-empty">Chưa có hoạt động nào</div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary" data-close-dialog="config-dialog">Đóng</button>
+        <div class="modal-foot-actions">
+          <button type="button" id="btn-cfg-toggle" class="btn btn-secondary">Bắt đầu treo</button>
+          <button type="submit" id="btn-cfg-save" class="btn btn-primary">Lưu cấu hình</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
